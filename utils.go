@@ -8,5 +8,5 @@ import (
 func generateId() string {
 	b := make([]byte, 16)
 	rand.Read(b)
-	return fmt.Sprint("%x", b)
+	return fmt.Sprintf("%x", b)
 }

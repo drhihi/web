@@ -6,94 +6,108 @@ import (
 	"html/template"
 
 	"web/models"
+
+	"github.com/codegangsta/martini"
+	"github.com/martini-contrib/render"
+	"github.com/russross/blackfriday"
 )
 
 var posts map[string]*models.Post
 
-func indexHendler(w http.ResponseWriter, r *http.Request) {
-
-	t, err := template.ParseFiles("templates/index.html", "templates/header.html", "templates/footer.html")
-	if err != nil {
-		fmt.Fprintf(w, err.Error())
-	}
-
-	t.ExecuteTemplate(w, "index", posts)
-
+func indexHendler(rnd render.Render) {
+	rnd.HTML(200, "index", posts)
 }
 
-func writeHendler(w http.ResponseWriter, r *http.Request) {
-
-	t, err := template.ParseFiles("templates/write.html", "templates/header.html", "templates/footer.html")
-	if err != nil {
-		fmt.Fprintf(w, err.Error())
-	}
-	t.ExecuteTemplate(w, "write", nil)
-
+func writeHendler(rnd render.Render) {
+	rnd.HTML(200, "write", nil)
 }
 
-func editHendler(w http.ResponseWriter, r *http.Request) {
-
-	t, err := template.ParseFiles("templates/write.html", "templates/header.html", "templates/footer.html")
-	if err != nil {
-		fmt.Fprintf(w, err.Error())
-	}
-
-	id := r.FormValue("id")
+func editHendler(rnd render.Render, params martini.Params) {
+	id := params["id"]
 	p, ok := posts[id]
 	if !ok {
-		http.NotFound(w, r)
+		rnd.Redirect("/")
+		return
 	}
-	t.ExecuteTemplate(w, "write", p)
-
+	rnd.HTML(200, "write", p)
 }
 
-func savePostHendler(w http.ResponseWriter, r *http.Request) {
-
+func savePostHendler(rnd render.Render, r *http.Request) {
 	id := r.FormValue("id")
 	title := r.FormValue("title")
-	content := r.FormValue("content")
+	contentMarkdown := r.FormValue("content")
+	contentHtml := string(blackfriday.MarkdownBasic([]byte(contentMarkdown)))
 
 	var post *models.Post
 	if id != "" {
 		post = posts[id]
 		post.Title = title
-		post.Content = content
+		post.ContentHtml = contentHtml
+		post.ContentMarkdown = contentMarkdown
 	} else {
 		id = generateId()
-		post := models.NewPost(id, title, content)
+		post := models.NewPost(id, title, contentHtml, contentMarkdown)
 		posts[post.Id] = post
 	}
 
-	http.Redirect(w, r,"/", 302)
-
+	rnd.Redirect("/", 302)
 }
 
-func deleteHendler(w http.ResponseWriter, r *http.Request) {
-
-	id := r.FormValue("id")
+func deleteHendler(rnd render.Render, params martini.Params) {
+	id := params["id"]
 	_, ok := posts[id]
 	if !ok {
-		http.NotFound(w, r)
+		rnd.Redirect("/", 404)
+		return
 	}
 	delete(posts, id)
 
-	http.Redirect(w, r,"/", 302)
-
+	rnd.Redirect("/", 302)
 }
 
-func main()  {
+func getHtmlHendler(rnd render.Render, r *http.Request) {
+	md := r.FormValue("md")
+	htmlBytes := blackfriday.MarkdownBasic([]byte(md))
+	rnd.JSON(200, map[string]interface{}{"html": string(htmlBytes)})
+}
+
+func unescape(x string) interface{} {
+	return template.HTML(x)
+}
+
+func main() {
 
 	fmt.Println("Listening on port: 3000")
 
 	posts = make(map[string]*models.Post, 0)
 
-	http.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("./assets/"))))
-	http.HandleFunc("/", indexHendler)
-	http.HandleFunc("/write", writeHendler)
-	http.HandleFunc("/edit", editHendler)
-	http.HandleFunc("/delete", deleteHendler)
-	http.HandleFunc("/SavePost", savePostHendler)
+	m := martini.Classic()
 
-	http.ListenAndServe(":3000", nil)
+	unescapeFuncMap := template.FuncMap{"unescape": unescape}
+
+	m.Use(render.Renderer(render.Options{
+		Directory:  "templates",
+		Layout:     "layout",
+		Extensions: []string{".tmpl", ".html"},
+		Funcs:      []template.FuncMap{unescapeFuncMap},
+		Charset:    "UTF-8",
+		IndentJSON: true,
+	}))
+
+	staticOptions := martini.StaticOptions{Prefix: "assets"}
+	m.Use(martini.Static("assets", staticOptions))
+
+	m.Get("/", indexHendler)
+	m.Get("/write", writeHendler)
+	m.Get("/edit/:id", editHendler)
+	m.Get("/delete/:id", deleteHendler)
+	m.Post("/SavePost", savePostHendler)
+	m.Post("/gethtml", getHtmlHendler)
+
+	m.Get("/test", func() string {
+		return "test"
+	})
+
+	m.Run()
 
 }
