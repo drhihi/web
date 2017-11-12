@@ -5,49 +5,62 @@ import (
 	"net/http"
 	"html/template"
 
-	"web/models"
+	"web/db/documents"
 
 	"github.com/codegangsta/martini"
 	"github.com/martini-contrib/render"
-	"github.com/russross/blackfriday"
+	"gopkg.in/mgo.v2"
+	_"log"
 )
 
-var posts map[string]*models.Post
+
+
+var postsCollection *mgo.Collection
 
 func indexHendler(rnd render.Render) {
-	rnd.HTML(200, "index", posts)
+
+	postsDocuments := []documents.PostDocument{}
+	postsCollection.Find(nil).All(&postsDocuments)
+
+	rnd.HTML(200, "index", postsDocuments)
 }
 
 func writeHendler(rnd render.Render) {
-	rnd.HTML(200, "write", nil)
+	postDocument := documents.PostDocument{}
+	rnd.HTML(200, "write", postDocument)
 }
 
 func editHendler(rnd render.Render, params martini.Params) {
 	id := params["id"]
-	p, ok := posts[id]
-	if !ok {
+	postDocument := documents.PostDocument{}
+	err := postsCollection.FindId(id).One(&postDocument)
+	if err != nil {
 		rnd.Redirect("/")
 		return
 	}
-	rnd.HTML(200, "write", p)
+
+	rnd.HTML(200, "write", postDocument)
 }
 
 func savePostHendler(rnd render.Render, r *http.Request) {
 	id := r.FormValue("id")
 	title := r.FormValue("title")
 	contentMarkdown := r.FormValue("content")
-	contentHtml := string(blackfriday.MarkdownBasic([]byte(contentMarkdown)))
+	contentHtml := convertMarkdownToHtml(contentMarkdown)
 
-	var post *models.Post
+	postDocument := documents.PostDocument{
+		id,
+		title,
+		contentHtml,
+		contentMarkdown,
+	}
+
 	if id != "" {
-		post = posts[id]
-		post.Title = title
-		post.ContentHtml = contentHtml
-		post.ContentMarkdown = contentMarkdown
+		postsCollection.UpdateId(id, postDocument)
 	} else {
 		id = generateId()
-		post := models.NewPost(id, title, contentHtml, contentMarkdown)
-		posts[post.Id] = post
+		postDocument.Id = id
+		postsCollection.Insert(postDocument)
 	}
 
 	rnd.Redirect("/", 302)
@@ -55,20 +68,22 @@ func savePostHendler(rnd render.Render, r *http.Request) {
 
 func deleteHendler(rnd render.Render, params martini.Params) {
 	id := params["id"]
-	_, ok := posts[id]
-	if !ok {
-		rnd.Redirect("/", 404)
+	postDocument := documents.PostDocument{}
+	err := postsCollection.FindId(id).One(&postDocument)
+	if err != nil {
+		rnd.Redirect("/")
 		return
 	}
-	delete(posts, id)
 
-	rnd.Redirect("/", 302)
+	postsCollection.RemoveId(id)
+
+	rnd.Redirect("/")
 }
 
 func getHtmlHendler(rnd render.Render, r *http.Request) {
 	md := r.FormValue("md")
-	htmlBytes := blackfriday.MarkdownBasic([]byte(md))
-	rnd.JSON(200, map[string]interface{}{"html": string(htmlBytes)})
+	html := convertMarkdownToHtml(md)
+	rnd.JSON(200, map[string]interface{}{"html": html})
 }
 
 func unescape(x string) interface{} {
@@ -79,7 +94,12 @@ func main() {
 
 	fmt.Println("Listening on port: 3000")
 
-	posts = make(map[string]*models.Post, 0)
+	session, err := mgo.Dial("localhost")
+	if err != nil {
+		panic(err)
+	}
+
+	postsCollection = session.DB("blog").C("posts")
 
 	m := martini.Classic()
 
