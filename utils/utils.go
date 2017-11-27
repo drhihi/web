@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"crypto/rand"
@@ -7,12 +7,12 @@ import (
 	"github.com/russross/blackfriday"
 )
 
-func generateId() string {
+func GenerateId() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return fmt.Sprintf("%x", b)
 }
 
-func convertMarkdownToHtml(markdown string) string {
+func ConvertMarkdownToHtml(markdown string) string {
 	return string(blackfriday.MarkdownBasic([]byte(markdown)))
 }
