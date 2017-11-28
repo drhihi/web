@@ -2,35 +2,65 @@ package session
 
 import (
 	"web/utils"
+	"github.com/codegangsta/martini"
+	"net/http"
+	"time"
 )
 
-type sessionData struct {
+const (
+	COOKIE_NAME = "sessionId"
+)
+
+type Session struct {
+	id       string
 	Username string
 }
 
-type Session struct {
-	data map[string]*sessionData
+type sessionStore struct {
+	data map[string]*Session
 }
 
-func NewSession() *Session {
-	s := new(Session)
-	s.data = make(map[string]*sessionData)
+func newSessionStore() *sessionStore {
+	s := new(sessionStore)
+	s.data = make(map[string]*Session)
 	return s
 }
 
-func (s *Session) Init(username string) string {
-	sessionId := utils.GenerateId()
-	data := &sessionData{Username: username}
+func (s *sessionStore) get(sessionId string) *Session {
+	session := s.data[sessionId]
+	if session == nil {
+		return &Session{id: sessionId}
+	}
+	return session
+}
 
-	s.data[sessionId] = data
+func (s *sessionStore) set(session *Session) {
+	s.data[session.id] = session
+}
+
+func ensureCookie(r *http.Request, w http.ResponseWriter) string {
+	cookie, _ := r.Cookie(COOKIE_NAME)
+	if cookie != nil {
+		return cookie.Value
+	}
+
+	sessionId := utils.GenerateId()
+	cookie = &http.Cookie{
+		Name:    COOKIE_NAME,
+		Value:   sessionId,
+		Expires: time.Now().Add(5 * time.Minute),
+	}
+	http.SetCookie(w, cookie)
 
 	return sessionId
 }
 
-func (s *Session) Get(sessionId string) string {
-	data := s.data[sessionId]
-	if data == nil {
-		return ""
-	}
-	return data.Username
+var globSessionStore = newSessionStore()
+
+func Middleware(ctx martini.Context, r *http.Request, w http.ResponseWriter) {
+	sessionId := ensureCookie(r, w)
+	session := globSessionStore.get(sessionId)
+	ctx.Map(session)
+	ctx.Next()
+	globSessionStore.set(session)
 }
